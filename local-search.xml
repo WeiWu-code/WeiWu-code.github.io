@@ -4,6 +4,33 @@
   
   
   <entry>
+    <title>用docker移植项目到麒麟v10系统</title>
+    <link href="/2025/12/31/tool-docker-deploy/"/>
+    <url>/2025/12/31/tool-docker-deploy/</url>
+    
+    <content type="html"><![CDATA[<p>最近需要在国产的麒麟v10操作系统上移植一个python开发的flask项目，在此记录一下。</p><p>Docker大家应该都不会陌生，它是一个进程级的轻量虚拟机，依托容器技术，是现在跨平台部署特别有用的一个工具。</p><p>选择Docker是因为目标机器是离线的，不能联网，在不联网的情况下很难处理python的各种依赖包，因此选择Docker</p><h3 id="1-制作Docker镜像"><a href="#1-制作Docker镜像" class="headerlink" title="1. 制作Docker镜像"></a>1. 制作Docker镜像</h3><p>制作Docker镜像通过编写Dockerfile实现，本项目并不复杂，所以就仅仅使用docker命令行。如果是复杂的项目，推荐使用Docker Compose。</p><p>首先，python项目是在一个虚拟环境运行的，需要将虚拟环境的依赖包导出为 requirements.txt</p><figure class="highlight bash"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><code class="hljs bash"><span class="hljs-comment"># 导出的虚拟环境里</span><br>python -m pip freeze &gt; requirements.txt<br></code></pre></td></tr></table></figure><p>这种方式会导出大量多余的包，我直接手动删除了不需要的。</p><p>之后，编写Dockerfile</p><p>Dockerfile编写如下所示：</p><figure class="highlight dockerfile"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br><span class="line">3</span><br><span class="line">4</span><br><span class="line">5</span><br><span class="line">6</span><br><span class="line">7</span><br><span class="line">8</span><br><span class="line">9</span><br><span class="line">10</span><br></pre></td><td class="code"><pre><code class="hljs dockerfile"><span class="hljs-keyword">FROM</span> python:<span class="hljs-number">3.10</span>-slim<br><span class="hljs-comment"># 工作目录</span><br><span class="hljs-keyword">WORKDIR</span><span class="language-bash"> /app</span><br><span class="hljs-comment"># 下载依赖</span><br><span class="hljs-keyword">COPY</span><span class="language-bash"> requirements.txt requirements.txt</span><br><span class="hljs-keyword">RUN</span><span class="language-bash"> pip install -r requirements.txt</span><br><span class="hljs-comment"># 拷贝源码</span><br><span class="hljs-keyword">COPY</span><span class="language-bash"> . .</span><br><span class="hljs-comment"># 使用gunicorn部署</span><br><span class="hljs-keyword">CMD</span><span class="language-bash"> [<span class="hljs-string">&quot;gunicorn&quot;</span>, <span class="hljs-string">&quot;-b&quot;</span>, <span class="hljs-string">&quot;0.0.0.0:5000&quot;</span>, <span class="hljs-string">&quot;main:app&quot;</span>]</span><br></code></pre></td></tr></table></figure><p>这里我采用了gunicorn部署，它是一个 <code>WSGI HTTP Server</code>，能稳定、高性能地并发处理 HTTP 请求。</p><p>然后制作Docker镜像，在有Dockerfile的目录下执行：</p><figure class="highlight bash"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><code class="hljs bash">docker build -t flask_project .<br></code></pre></td></tr></table></figure><p>制作出一个名为 <code>flask_project</code> 的镜像。</p><p>导出镜像使用<code>docker save -o [导出的文件名字] [镜像名字]</code></p><figure class="highlight dockerfile"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><code class="hljs dockerfile">docker save -o flask.tar flask_project:latest<br></code></pre></td></tr></table></figure><h3 id="2-Docker离线安装"><a href="#2-Docker离线安装" class="headerlink" title="2. Docker离线安装"></a>2. Docker离线安装</h3><p>由于目标机器不能联网，所以下载Docker的离线安装包，<a href="https://download.docker.com/linux/static/stable/">下载地址</a></p><p>我选择了x86_64的23.01版本<br><img src="/img/docker_deploy/image-20251231173914213.png"></p><p>解压到目标机器后，移动到<code>/usr/bin</code>就可以使用了。</p><h4 id="2-1-权限问题"><a href="#2-1-权限问题" class="headerlink" title="2.1 权限问题"></a>2.1 权限问题</h4><p>Docker默认安装好后，会出现权限问题，如下所示：</p><figure class="highlight bash"><table><tr><td class="gutter"><pre><span class="line">1</span><br><span class="line">2</span><br></pre></td><td class="code"><pre><code class="hljs bash">$ docker ps<br>Got permission denied <span class="hljs-keyword">while</span> trying to connect to the Docker daemon socket<br></code></pre></td></tr></table></figure><p>解决方案如下：</p><ol><li>创建一个用户组 <code>sudo groupadd docker</code></li><li>添加当前普通用户到用户组 <code>sudo usermod -aG docker your_username</code></li><li>重启docker <code>sudo systemctl restart docker</code> </li><li>刷新组信息 <code>newgrp docker</code></li></ol><h3 id="3-部署"><a href="#3-部署" class="headerlink" title="3. 部署"></a>3. 部署</h3><p>将第一步打包的 <code>flask.tar</code> 拿过来，加载镜像</p><figure class="highlight bash"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><code class="hljs bash">docker load -i flask.tar<br></code></pre></td></tr></table></figure><p>查看镜像</p><figure class="highlight bash"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><code class="hljs bash">docker images<br></code></pre></td></tr></table></figure><p>运行镜像</p><figure class="highlight bash"><table><tr><td class="gutter"><pre><span class="line">1</span><br></pre></td><td class="code"><pre><code class="hljs bash">docker run -it -d -p 5000:5000 --restart=always --name=flaskProject flask_project:latest<br></code></pre></td></tr></table></figure><p>其中，-p是端口映射，–restart配置自动重启等等</p><h3 id="4-说明与体会"><a href="#4-说明与体会" class="headerlink" title="4. 说明与体会"></a>4. 说明与体会</h3><p><code>docker save</code> 和<code>docker load</code>是一起的，<code>docker export</code>和<code>docker import</code>的区别？</p><p>核心记住两点：</p><ol><li><strong>export &#x2F; import</strong> 操作对象是“容器”（container），导出的是<strong>裸文件系统 tar</strong>——没有镜像层、没有历史、没有元数据。</li><li><strong>save &#x2F; load</strong> 操作对象是“镜像”（image），导出的是<strong>完整镜像 tar</strong>——包含所有层、历史、repo:tag、构建缓存等。</li></ol><p>绝对不能混用。</p><h4 id="4-1-常见误区"><a href="#4-1-常见误区" class="headerlink" title="4.1 常见误区"></a>4.1 常见误区</h4><ol><li>用 export 想保存“镜像”——结果丢失所有元数据，启动容器会报错“&#x2F;bin&#x2F;sh not found”之类。</li><li>用 save 去保存容器——命令会直接拒绝，save 只能接镜像名。</li><li>import 后忘了重新写 Dockerfile 或 docker run 参数——导致“镜像能跑起来却端口不对、命令不对”。</li><li>把 export&#x2F;import 当成“精简镜像”手段——其实只是压扁层，并不会比 <code>docker build --squash</code> 更优，且失去缓存。</li></ol>]]></content>
+    
+    
+    <categories>
+      
+      <category>工具使用</category>
+      
+    </categories>
+    
+    
+    <tags>
+      
+      <tag>docker</tag>
+      
+      <tag>跨平台移植</tag>
+      
+    </tags>
+    
+  </entry>
+  
+  
+  
+  <entry>
     <title>LeetCode239 滑动窗口最大值</title>
     <link href="/2025/12/29/leetcode239/"/>
     <url>/2025/12/29/leetcode239/</url>
